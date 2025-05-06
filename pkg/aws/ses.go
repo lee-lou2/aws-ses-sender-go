@@ -3,6 +3,8 @@ package aws
 import (
 	"aws-ses-sender-go/config"
 	"context"
+	"strconv"
+
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awsConfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
@@ -35,7 +37,7 @@ func NewSESClient(ctx context.Context) (*SES, error) {
 }
 
 // SendEmail sends an email
-func (s *SES) SendEmail(ctx context.Context, subject, body *string, receivers *[]string) (string, error) {
+func (s *SES) SendEmail(ctx context.Context, reqId int, subject, body *string, receivers *[]string) (string, error) {
 	sender := config.GetEnv("EMAIL_SENDER")
 	input := &sesv2.SendEmailInput{
 		FromEmailAddress: aws.String(sender),
@@ -50,6 +52,12 @@ func (s *SES) SendEmail(ctx context.Context, subject, body *string, receivers *[
 				Body: &types.Body{
 					Html: &types.Content{
 						Data: aws.String(*body),
+					},
+				},
+				Headers: []types.MessageHeader{
+					{
+						Name:  aws.String("X-Request-ID"),
+						Value: aws.String(strconv.Itoa(reqId)),
 					},
 				},
 			},

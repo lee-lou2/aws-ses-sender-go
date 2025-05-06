@@ -1,4 +1,4 @@
-package sender
+package cmd
 
 import (
 	"aws-ses-sender-go/config"
@@ -11,8 +11,9 @@ import (
 
 var reqChan = make(chan *model.Request, 1000)
 
-// ConsumeSend consumes the email sending requests
-func ConsumeSend() {
+// RunSender runs the email sender
+// It consumes the email sending requests from the channel and sends them to the AWS SES
+func RunSender() {
 	rateStr := config.GetEnv("EMAIL_RATE", "14")
 	rate, _ := strconv.Atoi(rateStr)
 	ctx := context.Background()
@@ -34,6 +35,7 @@ func ConsumeSend() {
 			defer cancel()
 			msgId, err := sesClient.SendEmail(
 				ctx,
+				int(r.ID),
 				&r.Subject,
 				&content,
 				&[]string{r.To},
@@ -51,7 +53,6 @@ func ConsumeSend() {
 					Status:    status,
 					Error:     errMsg,
 				})
-
 		}(req)
 	}
 }

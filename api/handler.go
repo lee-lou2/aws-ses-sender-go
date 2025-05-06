@@ -123,6 +123,10 @@ func createResultEventHandler(c fiber.Ctx) error {
 		NotificationType string `json:"notificationType"`
 		Mail             struct {
 			MessageId string `json:"messageId"`
+			Headers   []struct {
+				Name  string `json:"name"`
+				Value string `json:"value"`
+			} `json:"headers"`
 		} `json:"mail"`
 	}
 	if err := json.Unmarshal([]byte(reqBody.Message), &sesNotification); err != nil {
@@ -132,14 +136,23 @@ func createResultEventHandler(c fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "SES message_id not found"})
 	}
 
-	db := config.GetDB()
-	var req model.Request
-	if err := db.Where("message_id = ?", sesNotification.Mail.MessageId).First(&req).Error; err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to retrieve request_id"})
+	// Find request_id from headers
+	var reqId uint
+	for _, header := range sesNotification.Mail.Headers {
+		if header.Name == "X-Request-ID" {
+			reqIdInt, _ := strconv.Atoi(header.Value)
+			reqId = uint(reqIdInt)
+			break
+		}
 	}
 
+	if reqId == 0 {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Request ID not found in headers"})
+	}
+
+	db := config.GetDB()
 	if err := db.Create(&model.Result{
-		RequestId: req.ID,
+		RequestId: reqId,
 		Status:    sesNotification.NotificationType,
 		Raw:       reqBody.Message,
 	}).Error; err != nil {

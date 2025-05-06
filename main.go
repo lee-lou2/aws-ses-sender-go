@@ -2,8 +2,9 @@ package main
 
 import (
 	"aws-ses-sender-go/api"
-	"aws-ses-sender-go/cmd/sender"
+	"aws-ses-sender-go/cmd"
 	"aws-ses-sender-go/config"
+
 	"github.com/getsentry/sentry-go"
 )
 
@@ -14,10 +15,10 @@ func main() {
 	})
 
 	// Message Scheduler
-	go sender.Run()
+	go cmd.RunScheduler()
 
 	// Email Consumer
-	go sender.ConsumeSend()
+	go cmd.RunSender()
 
 	// HTTP Server
 	api.Run()
