@@ -9,16 +9,7 @@ import (
 	"time"
 )
 
-// Request sends an email
-func Request(req model.Request, ctx context.Context) {
-	reqChan <- request{
-		ID:      req.ID,
-		To:      req.To,
-		Subject: req.Subject,
-		Content: req.Content,
-		Ctx:     ctx,
-	}
-}
+var reqChan = make(chan *model.Request, 1000)
 
 // ConsumeSend consumes the email sending requests
 func ConsumeSend() {
@@ -30,49 +21,37 @@ func ConsumeSend() {
 		panic(err)
 	}
 
+	db := config.GetDB()
 	ticker := time.NewTicker(1 * time.Second / time.Duration(rate))
 	for range ticker.C {
-		msg := <-reqChan
-		if msg.Ctx.Err() != nil {
-			// Stop immediately if there is a context error
-			resultChan <- result{
-				MessageId: "",
-				ID:        msg.ID,
-				Status:    model.EmailMessageStatusStopped,
-				Error:     msg.Ctx.Err().Error(),
-			}
-			continue
-		}
-		go func(m *request) {
+		req := <-reqChan
+		go func(r *model.Request) {
 			// Add code for the open event at the end of the body
 			serverHost := config.GetEnv("SERVER_HOST", "http://localhost:3000")
-			content := m.Content
-			content += `<img src="` + serverHost + `/v1/events/open/?requestId=` + strconv.Itoa(int(m.ID)) + `">`
+			content := r.Content
+			content += `<img src="` + serverHost + `/v1/events/open/?requestId=` + strconv.Itoa(int(r.ID)) + `">`
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
 			msgId, err := sesClient.SendEmail(
 				ctx,
-				&m.Subject,
+				&r.Subject,
 				&content,
-				&[]string{m.To},
+				&[]string{r.To},
 			)
+			status := model.EmailMessageStatusSent
+			errMsg := ""
 			if err != nil {
-				// Sending failed
-				resultChan <- result{
+				status = model.EmailMessageStatusFailed
+				errMsg = err.Error()
+			}
+			db.Model(&model.Request{}).
+				Where("id = ?", r.ID).
+				Updates(model.Request{
 					MessageId: msgId,
-					ID:        msg.ID,
-					Status:    model.EmailMessageStatusFailed,
-					Error:     err.Error(),
-				}
-				return
-			}
-			// Sending succeeded
-			resultChan <- result{
-				MessageId: msgId,
-				ID:        msg.ID,
-				Status:    model.EmailMessageStatusSent,
-				Error:     "",
-			}
-		}(&msg)
+					Status:    status,
+					Error:     errMsg,
+				})
+
+		}(req)
 	}
 }
