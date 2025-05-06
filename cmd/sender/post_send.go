@@ -7,18 +7,13 @@ import (
 	"time"
 )
 
-const (
-	bulkSize   = 1000
-	bulkPeriod = 10 * time.Second
-)
-
 // ConsumePostSend updates messages after processing
 func ConsumePostSend() {
+	bulkSize := 1000
+	bulkPeriod := 10 * time.Second
 	buffer := make([]result, 0, bulkSize)
 
 	ticker := time.NewTicker(bulkPeriod)
-	defer ticker.Stop()
-
 	for {
 		select {
 		case r := <-resultChan:

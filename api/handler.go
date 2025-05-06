@@ -1,18 +1,18 @@
 package api
 
 import (
-	"aws-ses-sender-go/cmd/sender"
 	"aws-ses-sender-go/config"
 	"aws-ses-sender-go/model"
 	"bytes"
 	"encoding/json"
-	"github.com/gofiber/fiber/v3"
 	"image"
 	"image/color"
 	"image/png"
 	"log"
 	"strconv"
 	"time"
+
+	"github.com/gofiber/fiber/v3"
 )
 
 // createMessageHandler Message Handler
@@ -21,20 +21,41 @@ func createMessageHandler(c fiber.Ctx) error {
 	start := time.Now()
 	var reqBody struct {
 		Messages []struct {
-			TopicId string `json:"topicId"`
-			Email   string `json:"email"`
-			Subject string `json:"subject"`
-			Content string `json:"content"`
+			TopicId     string   `json:"topicId"`
+			Emails      []string `json:"emails"`
+			Subject     string   `json:"subject"`
+			Content     string   `json:"content"`
+			ScheduledAt string   `json:"scheduledAt"`
 		} `json:"messages"`
 	}
 	if err := c.Bind().JSON(&reqBody); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 	}
 
-	for _, message := range reqBody.Messages {
-		// Request the sender to send the email
-		ctx := c.Context()
-		sender.Request(message.TopicId, message.Email, message.Subject, message.Content, ctx)
+	db := config.GetDB()
+	reqs := make([]*model.Request, 0)
+	for _, msg := range reqBody.Messages {
+		for _, email := range msg.Emails {
+			req := &model.Request{
+				TopicId: msg.TopicId,
+				To:      email,
+				Subject: msg.Subject,
+				Content: msg.Content,
+				Status:  model.EmailMessageStatusCreated,
+			}
+			reqs = append(reqs, req)
+		}
+	}
+
+	chunkSize := 1000
+	for i := 0; i < len(reqs); i += chunkSize {
+		end := i + chunkSize
+		if end > len(reqs) {
+			end = len(reqs)
+		}
+		if err := db.Create(reqs[i:end]).Error; err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+		}
 	}
 
 	// Return the result
@@ -51,11 +72,11 @@ func createOpenEventHandler(c fiber.Ctx) error {
 	if reqId != "" {
 		// Consider email as opened and create data
 		db := config.GetDB()
-		var message model.Result
 		reqIdInt, _ := strconv.Atoi(reqId)
-		message.RequestId = uint(reqIdInt)
-		message.Status = "Open"
-		_ = db.Create(&message).Error
+		_ = db.Create(&model.Result{
+			RequestId: uint(reqIdInt),
+			Status:    "Open",
+		}).Error
 	}
 
 	// Return a blank image
@@ -72,47 +93,79 @@ func createOpenEventHandler(c fiber.Ctx) error {
 // createResultEventHandler Result Event Handler
 // Handler that receives AWS SES results
 func createResultEventHandler(c fiber.Ctx) error {
+	// SNS 메시지 타입 헤더 확인
+	msgType := c.Get("x-amz-sns-message-type")
+	if msgType != "Notification" && msgType != "SubscriptionConfirmation" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid SNS Message Type"})
+	}
+
+	// SNS 메시지 파싱
 	var reqBody struct {
 		Type         string `json:"Type"`
 		Message      string `json:"Message"`
+		MessageId    string `json:"MessageId"`
 		SubscribeURL string `json:"SubscribeURL"`
 	}
 	if err := c.Bind().JSON(&reqBody); err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
-	}
-	if reqBody.Type == "SubscriptionConfirmation" {
-		log.Println(reqBody.SubscribeURL)
-		return c.JSON(fiber.Map{})
-	} else if reqBody.Type != "Notification" {
-		return c.JSON(fiber.Map{})
+		log.Printf("Failed to parse SNS message: %v", err)
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Failed to parse SNS message"})
 	}
 
-	// Retrieve message
-	var bodyMessage struct {
+	// 구독 확인 처리
+	if reqBody.Type == "SubscriptionConfirmation" {
+		log.Printf("Subscription confirmation required. Visiting: %s", reqBody.SubscribeURL)
+		return c.JSON(fiber.Map{"message": "Subscription confirmation required"})
+	}
+
+	// 알림 메시지가 아닌 경우 처리
+	if reqBody.Type != "Notification" {
+		log.Printf("Received other message type")
+		return c.JSON(fiber.Map{"message": "Other message type received"})
+	}
+
+	// SES 알림 메시지 파싱
+	var sesNotification struct {
 		EventType string `json:"eventType"`
 		Mail      struct {
 			MessageId string `json:"messageId"`
 		} `json:"mail"`
 	}
-	if err := json.Unmarshal([]byte(reqBody.Message), &bodyMessage); err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+	if err := json.Unmarshal([]byte(reqBody.Message), &sesNotification); err != nil {
+		log.Printf("Failed to parse SES notification: %v, message: %s", err, reqBody.Message)
+		return c.JSON(fiber.Map{"message": "Non-SES notification received"})
 	}
 
-	// Retrieve message
+	// MessageId가 없는 경우 처리
+	if sesNotification.Mail.MessageId == "" {
+		log.Printf("SES message_id not found in notification. SNS MessageId: %s. Message: %s",
+			reqBody.MessageId, reqBody.Message)
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "SES message_id not found"})
+	}
+
+	// DB에서 요청 ID 조회
 	db := config.GetDB()
-	var request model.Request
-	if err := db.Where("request_id = ?", bodyMessage.Mail.MessageId).First(&request).Error; err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+	var req model.Request
+	if err := db.Where("message_id = ?", sesNotification.Mail.MessageId).First(&req).Error; err != nil {
+		log.Printf("Failed to retrieve request_id. SNS MessageId: %s, SES MessageId: %s, Error: %v",
+			reqBody.MessageId, sesNotification.Mail.MessageId, err)
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Failed to retrieve request_id",
+		})
 	}
 
-	// Save result
-	result := model.Result{
-		RequestId: request.ID,
-		Status:    bodyMessage.EventType,
+	// 결과 저장
+	if err := db.Create(&model.Result{
+		RequestId: req.ID,
+		Status:    sesNotification.EventType,
 		Raw:       reqBody.Message,
+	}).Error; err != nil {
+		log.Printf("Failed to save event to database: %v", err)
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Failed to save event",
+		})
 	}
-	_ = db.Create(&result).Error
-	return c.JSON(fiber.Map{})
+
+	return c.JSON(fiber.Map{"message": "OK"})
 }
 
 // getResultCountHandler Retrieve email delivery results as counts
@@ -125,11 +178,11 @@ func getResultCountHandler(c fiber.Ctx) error {
 	db := config.GetDB()
 
 	// Check if any requests exist for the given topicID.  Early exit if none.
-	var requestCount int64
-	if err := db.Model(&model.Request{}).Where("topic_id = ?", topicID).Count(&requestCount).Error; err != nil {
+	var reqCnt int64
+	if err := db.Model(&model.Request{}).Where("topic_id = ?", topicID).Count(&reqCnt).Error; err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
-	if requestCount == 0 {
+	if reqCnt == 0 {
 		return c.JSON(fiber.Map{
 			"request": fiber.Map{"total": 0, "created": 0, "sent": 0, "failed": 0, "stopped": 0},
 			"result":  fiber.Map{"total": 0, "statuses": map[string]int{}},
@@ -137,7 +190,7 @@ func getResultCountHandler(c fiber.Ctx) error {
 	}
 
 	// --- Request Counts (Efficient Single Query) ---
-	var requestResults []struct {
+	var reqResults []struct {
 		Status int
 		Count  int
 	}
@@ -145,28 +198,28 @@ func getResultCountHandler(c fiber.Ctx) error {
 		Select("status, COUNT(*) as count").
 		Where("topic_id = ?", topicID).
 		Group("status").
-		Scan(&requestResults).Error; err != nil {
+		Scan(&reqResults).Error; err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
 
-	requestCounts := struct {
+	reqCnts := struct {
 		Total   int `json:"total"`
 		Created int `json:"created"`
 		Sent    int `json:"sent"`
 		Failed  int `json:"failed"`
 		Stopped int `json:"stopped"`
-	}{Total: int(requestCount)} // Initialize Total with requestCount
+	}{Total: int(reqCnt)} // Initialize Total with requestCount
 
-	for _, r := range requestResults {
+	for _, r := range reqResults {
 		switch r.Status {
 		case model.EmailMessageStatusCreated:
-			requestCounts.Created = r.Count
+			reqCnts.Created = r.Count
 		case model.EmailMessageStatusSent:
-			requestCounts.Sent = r.Count
+			reqCnts.Sent = r.Count
 		case model.EmailMessageStatusFailed:
-			requestCounts.Failed = r.Count
+			reqCnts.Failed = r.Count
 		case model.EmailMessageStatusStopped:
-			requestCounts.Stopped = r.Count
+			reqCnts.Stopped = r.Count
 		}
 	}
 
@@ -196,7 +249,7 @@ func getResultCountHandler(c fiber.Ctx) error {
 
 	// --- Return Combined Result ---
 	return c.JSON(fiber.Map{
-		"request": requestCounts,
+		"request": reqCnts,
 		"result": fiber.Map{
 			"statuses": resultCounts,
 		},
@@ -216,14 +269,14 @@ func getSentCountHandler(c fiber.Ctx) error {
 
 	// Get the number of emails after startTime from the DB
 	db := config.GetDB()
-	var count int64
+	var cnt int64
 	if err := db.Model(&model.Request{}).
 		Where("created_at > ?", startTime).
 		Where("status = ?", model.EmailMessageStatusSent).
-		Count(&count).Error; err != nil {
+		Count(&cnt).Error; err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
 
 	// Return the result
-	return c.JSON(fiber.Map{"count": count})
+	return c.JSON(fiber.Map{"count": cnt})
 }

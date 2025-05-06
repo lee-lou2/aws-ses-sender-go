@@ -3,22 +3,29 @@ package api
 import (
 	"aws-ses-sender-go/config"
 	"fmt"
-	"github.com/gofiber/fiber/v3/middleware/requestid"
+	"github.com/gofiber/fiber/v3/middleware/pprof"
 	"log"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/gofiber/fiber/v3/middleware/logger"
+	recoverer "github.com/gofiber/fiber/v3/middleware/recover"
+	jsoniter "github.com/json-iterator/go"
 )
 
 func Run() {
 	app := fiber.New(
-		fiber.Config{AppName: "aws-ses-sender-go"},
+		fiber.Config{
+			AppName:     "aws-ses-sender-go",
+			JSONEncoder: jsoniter.Marshal,
+			JSONDecoder: jsoniter.Unmarshal,
+		},
 	)
 
 	// Middleware
-	app.Use(requestid.New())
+	app.Use(pprof.New())
+	app.Use(recoverer.New())
 	app.Use(logger.New(logger.Config{
-		Format:     "${time} ${pid} ${locals:requestid} ${status} - ${method} ${path} ${latency}\n",
+		Format:     "${time} ${pid} ${status} - ${method} ${path} ${latency}\n",
 		TimeFormat: "2006-01-02 15:04:05",
 		TimeZone:   "Local",
 	}))

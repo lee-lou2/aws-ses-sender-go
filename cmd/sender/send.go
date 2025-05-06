@@ -9,6 +9,17 @@ import (
 	"time"
 )
 
+// Request sends an email
+func Request(req model.Request, ctx context.Context) {
+	reqChan <- request{
+		ID:      req.ID,
+		To:      req.To,
+		Subject: req.Subject,
+		Content: req.Content,
+		Ctx:     ctx,
+	}
+}
+
 // ConsumeSend consumes the email sending requests
 func ConsumeSend() {
 	rateStr := config.GetEnv("EMAIL_RATE", "14")
@@ -19,51 +30,49 @@ func ConsumeSend() {
 		panic(err)
 	}
 
-	for {
-		<-time.After(time.Second / time.Duration(rate))
-		select {
-		case msg := <-reqChan:
-			if msg.Ctx.Err() != nil {
-				// Stop immediately if there is a context error
-				resultChan <- result{
-					MessageId: "",
-					ID:        msg.ID,
-					Status:    model.EmailMessageStatusStopped,
-					Error:     msg.Ctx.Err().Error(),
-				}
-				continue
+	ticker := time.NewTicker(1 * time.Second / time.Duration(rate))
+	for range ticker.C {
+		msg := <-reqChan
+		if msg.Ctx.Err() != nil {
+			// Stop immediately if there is a context error
+			resultChan <- result{
+				MessageId: "",
+				ID:        msg.ID,
+				Status:    model.EmailMessageStatusStopped,
+				Error:     msg.Ctx.Err().Error(),
 			}
-			go func(m *request) {
-				// Add code for the open event at the end of the body
-				serverHost := config.GetEnv("SERVER_HOST", "http://localhost:3000")
-				content := m.Content
-				content += `<img src="` + serverHost + `/v1/events/open/?requestId=` + strconv.Itoa(int(m.ID)) + `">`
-				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-				defer cancel()
-				msgId, err := sesClient.SendEmail(
-					ctx,
-					&m.Subject,
-					&content,
-					&[]string{m.To},
-				)
-				if err != nil {
-					// Sending failed
-					resultChan <- result{
-						MessageId: msgId,
-						ID:        msg.ID,
-						Status:    model.EmailMessageStatusFailed,
-						Error:     err.Error(),
-					}
-					return
-				}
-				// Sending succeeded
+			continue
+		}
+		go func(m *request) {
+			// Add code for the open event at the end of the body
+			serverHost := config.GetEnv("SERVER_HOST", "http://localhost:3000")
+			content := m.Content
+			content += `<img src="` + serverHost + `/v1/events/open/?requestId=` + strconv.Itoa(int(m.ID)) + `">`
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			msgId, err := sesClient.SendEmail(
+				ctx,
+				&m.Subject,
+				&content,
+				&[]string{m.To},
+			)
+			if err != nil {
+				// Sending failed
 				resultChan <- result{
 					MessageId: msgId,
 					ID:        msg.ID,
-					Status:    model.EmailMessageStatusSent,
-					Error:     "",
+					Status:    model.EmailMessageStatusFailed,
+					Error:     err.Error(),
 				}
-			}(&msg)
-		}
+				return
+			}
+			// Sending succeeded
+			resultChan <- result{
+				MessageId: msgId,
+				ID:        msg.ID,
+				Status:    model.EmailMessageStatusSent,
+				Error:     "",
+			}
+		}(&msg)
 	}
 }
