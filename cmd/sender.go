@@ -30,7 +30,7 @@ func RunSender() {
 			// Add code for the open event at the end of the body
 			serverHost := config.GetEnv("SERVER_HOST", "http://localhost:3000")
 			content := r.Content
-			content += `<img src="` + serverHost + `/v1/events/open/?requestId=` + strconv.Itoa(int(r.ID)) + `">`
+			content += `<img src="` + serverHost + `/v1/events/open?requestId=` + strconv.Itoa(int(r.ID)) + `">`
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
 			msgId, err := sesClient.SendEmail(
