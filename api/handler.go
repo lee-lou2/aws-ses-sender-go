@@ -76,6 +76,7 @@ func createOpenEventHandler(c fiber.Ctx) error {
 		_ = db.Create(&model.Result{
 			RequestId: uint(reqIdInt),
 			Status:    "Open",
+			Raw:       "{}",
 		}).Error
 	}
 
