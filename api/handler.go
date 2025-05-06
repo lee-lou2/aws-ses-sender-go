@@ -93,13 +93,11 @@ func createOpenEventHandler(c fiber.Ctx) error {
 // createResultEventHandler Result Event Handler
 // Handler that receives AWS SES results
 func createResultEventHandler(c fiber.Ctx) error {
-	// SNS 메시지 타입 헤더 확인
 	msgType := c.Get("x-amz-sns-message-type")
 	if msgType != "Notification" && msgType != "SubscriptionConfirmation" {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid SNS Message Type"})
 	}
 
-	// SNS 메시지 파싱
 	var reqBody struct {
 		Type         string `json:"Type"`
 		Message      string `json:"Message"`
@@ -107,64 +105,45 @@ func createResultEventHandler(c fiber.Ctx) error {
 		SubscribeURL string `json:"SubscribeURL"`
 	}
 	if err := c.Bind().JSON(&reqBody); err != nil {
-		log.Printf("Failed to parse SNS message: %v", err)
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Failed to parse SNS message"})
 	}
 
-	// 구독 확인 처리
 	if reqBody.Type == "SubscriptionConfirmation" {
+		// Subscription confirmation
 		log.Printf("Subscription confirmation required. Visiting: %s", reqBody.SubscribeURL)
 		return c.JSON(fiber.Map{"message": "Subscription confirmation required"})
 	}
 
-	// 알림 메시지가 아닌 경우 처리
 	if reqBody.Type != "Notification" {
-		log.Printf("Received other message type")
 		return c.JSON(fiber.Map{"message": "Other message type received"})
 	}
 
-	// SES 알림 메시지 파싱
 	var sesNotification struct {
-		EventType string `json:"eventType"`
-		Mail      struct {
+		NotificationType string `json:"notificationType"`
+		Mail             struct {
 			MessageId string `json:"messageId"`
 		} `json:"mail"`
 	}
 	if err := json.Unmarshal([]byte(reqBody.Message), &sesNotification); err != nil {
-		log.Printf("Failed to parse SES notification: %v, message: %s", err, reqBody.Message)
 		return c.JSON(fiber.Map{"message": "Non-SES notification received"})
 	}
-
-	// MessageId가 없는 경우 처리
 	if sesNotification.Mail.MessageId == "" {
-		log.Printf("SES message_id not found in notification. SNS MessageId: %s. Message: %s",
-			reqBody.MessageId, reqBody.Message)
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "SES message_id not found"})
 	}
 
-	// DB에서 요청 ID 조회
 	db := config.GetDB()
 	var req model.Request
 	if err := db.Where("message_id = ?", sesNotification.Mail.MessageId).First(&req).Error; err != nil {
-		log.Printf("Failed to retrieve request_id. SNS MessageId: %s, SES MessageId: %s, Error: %v",
-			reqBody.MessageId, sesNotification.Mail.MessageId, err)
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error": "Failed to retrieve request_id",
-		})
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to retrieve request_id"})
 	}
 
-	// 결과 저장
 	if err := db.Create(&model.Result{
 		RequestId: req.ID,
-		Status:    sesNotification.EventType,
+		Status:    sesNotification.NotificationType,
 		Raw:       reqBody.Message,
 	}).Error; err != nil {
-		log.Printf("Failed to save event to database: %v", err)
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error": "Failed to save event",
-		})
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to save event"})
 	}
-
 	return c.JSON(fiber.Map{"message": "OK"})
 }
 
