@@ -35,13 +35,23 @@ func createMessageHandler(c fiber.Ctx) error {
 	db := config.GetDB()
 	reqs := make([]*model.Request, 0)
 	for _, msg := range reqBody.Messages {
+		var scheduledAt *time.Time
+		if msg.ScheduledAt != "" {
+			loc, _ := time.LoadLocation("Asia/Seoul")
+			if t, err := time.ParseInLocation(time.DateTime, msg.ScheduledAt, loc); err != nil {
+				return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid scheduledAt format"})
+			} else {
+				scheduledAt = &t
+			}
+		}
 		for _, email := range msg.Emails {
 			req := &model.Request{
-				TopicId: msg.TopicId,
-				To:      email,
-				Subject: msg.Subject,
-				Content: msg.Content,
-				Status:  model.EmailMessageStatusCreated,
+				TopicId:     msg.TopicId,
+				To:          email,
+				Subject:     msg.Subject,
+				Content:     msg.Content,
+				ScheduledAt: scheduledAt,
+				Status:      model.EmailMessageStatusCreated,
 			}
 			reqs = append(reqs, req)
 		}

@@ -17,7 +17,7 @@ func main() {
 	// Message Scheduler
 	go cmd.RunScheduler()
 
-	// Email Consumer
+	// Email Sender
 	go cmd.RunSender()
 
 	// HTTP Server

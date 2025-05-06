@@ -20,7 +20,8 @@ func RunScheduler() {
 	ticker := time.NewTicker(1 * time.Minute)
 	for range ticker.C {
 		for i := 0; i < sendPerMin; i += batchSize {
-			now := time.Now()
+			loc, _ := time.LoadLocation("Asia/Seoul")
+			now := time.Now().In(loc)
 			reqs := make([]*model.Request, 0, batchSize)
 			err := db.Raw(`
 				UPDATE email_requests
