@@ -17,7 +17,11 @@ func Run() {
 		reqs := make([]*model.Request, 0, 1000)
 		err := db.Model(&model.Request{}).
 			Clauses(clause.Returning{}).
-			Where("status = ? AND scheduled_at <= ?", model.EmailMessageStatusCreated, now).
+			Where(
+				"status = ? AND (scheduled_at <= ? OR scheduled_at IS NULL)",
+				model.EmailMessageStatusCreated,
+				now,
+			).
 			Limit(1000).
 			Updates(model.Request{Status: model.EmailMessageStatusProcessing}).
 			Scan(&reqs).Error
