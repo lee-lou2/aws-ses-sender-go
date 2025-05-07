@@ -181,7 +181,7 @@ Request body example:
       "emails": ["recipient1@example.com", "recipient2@example.com"],
       "subject": "Special Promotion Notice",
       "content": "<h1>Hello!</h1><p>Check out our special promotion.</p>",
-      "scheduledAt": "2024-12-25 10:00:00"
+      "scheduledAt": "2024-12-25T10:00:00+09:00"
     }
   ]
 }

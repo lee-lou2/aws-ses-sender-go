@@ -181,7 +181,7 @@ POST /v1/messages
       "emails": ["recipient1@example.com", "recipient2@example.com"],
       "subject": "특별 프로모션 안내",
       "content": "<h1>안녕하세요!</h1><p>특별 프로모션 내용을 확인하세요.</p>",
-      "scheduledAt": "2024-12-25 10:00:00"
+      "scheduledAt": "2024-12-25T10:00:00+09:00"
     }
   ]
 }
