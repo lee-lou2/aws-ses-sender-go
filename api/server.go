@@ -2,9 +2,11 @@ package api
 
 import (
 	"aws-ses-sender-go/config"
+	"context"
 	"fmt"
-	"github.com/gofiber/fiber/v3/middleware/pprof"
 	"log"
+
+	"github.com/gofiber/fiber/v3/middleware/pprof"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/gofiber/fiber/v3/middleware/logger"
@@ -12,10 +14,11 @@ import (
 	jsoniter "github.com/json-iterator/go"
 )
 
-func Run() {
+func Run(ctx context.Context) {
 	app := fiber.New(
 		fiber.Config{
-			AppName:     "aws-ses-sender-go",
+			AppName: "aws-ses-sender",
+			// JSON Encoder and Decoder(Fast JSON library)
 			JSONEncoder: jsoniter.Marshal,
 			JSONDecoder: jsoniter.Unmarshal,
 		},
@@ -33,5 +36,10 @@ func Run() {
 	// Routes
 	setV1Routes(app)
 
-	log.Fatal(app.Listen(fmt.Sprintf(":%s", config.GetEnv("SERVER_PORT", "3000"))))
+	go func() {
+		log.Fatal(app.Listen(fmt.Sprintf(":%s", config.GetEnv("SERVER_PORT", "3000"))))
+	}()
+
+	<-ctx.Done()
+	app.Shutdown()
 }

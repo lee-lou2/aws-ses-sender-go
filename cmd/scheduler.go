@@ -3,6 +3,7 @@ package cmd
 import (
 	"aws-ses-sender-go/config"
 	"aws-ses-sender-go/model"
+	"context"
 	"log"
 	"strconv"
 	"time"
@@ -10,47 +11,56 @@ import (
 
 // RunScheduler runs the scheduler
 // It schedules the email sending requests to be processed by the sender
-func RunScheduler() {
+func RunScheduler(ctx context.Context) {
 	db := config.GetDB()
 	sendPerSecStr := config.GetEnv("EMAIL_RATE", "14")
-	sendPerSec, _ := strconv.Atoi(sendPerSecStr)
+	sendPerSec, err := strconv.Atoi(sendPerSecStr)
+	if err != nil {
+		log.Fatalf("Invalid EMAIL_RATE: %v", err)
+	}
 	sendPerMin := sendPerSec * 60
 	batchSize := 1000
 
 	ticker := time.NewTicker(1 * time.Minute)
-	for range ticker.C {
-		for i := 0; i < sendPerMin; i += batchSize {
-			loc, _ := time.LoadLocation("Asia/Seoul")
-			now := time.Now().In(loc)
-			reqs := make([]*model.Request, 0, batchSize)
-			err := db.Raw(`
-				UPDATE email_requests
-				SET status = ?, updated_at = ?
-				WHERE id IN (
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			for i := 0; i < sendPerMin; i += batchSize {
+				now := time.Now().UTC()
+				reqs := make([]*model.Request, 0, batchSize)
+				err := db.Raw(`
+				WITH locked_requests AS (
 					SELECT id
 					FROM email_requests
 					WHERE status = ? AND (scheduled_at <= ? OR scheduled_at IS NULL) AND deleted_at IS NULL
-					ORDER BY id
+					ORDER BY id ASC
 					LIMIT ?
 					FOR UPDATE SKIP LOCKED
 				)
-				RETURNING *;
+				UPDATE email_requests
+				SET status = ?, updated_at = ?
+				FROM locked_requests
+				WHERE email_requests.id = locked_requests.id
+				RETURNING email_requests.*;
 			`,
-				model.EmailMessageStatusProcessing,
-				now,
-				model.EmailMessageStatusCreated,
-				now,
-				batchSize,
-			).Scan(&reqs).Error
+					model.EmailMessageStatusCreated,
+					now,
+					batchSize,
+					model.EmailMessageStatusProcessing,
+					now,
+				).Scan(&reqs).Error
 
-			if err != nil {
-				log.Printf("Update Returning Error: %v", err)
-			} else if len(reqs) > 0 {
-				for _, req := range reqs {
-					reqChan <- req
+				if err != nil {
+					log.Printf("Update Returning Error: %v", err)
+				} else if len(reqs) > 0 {
+					for _, req := range reqs {
+						reqChan <- req
+					}
+				} else {
+					break
 				}
-			} else {
-				break
 			}
 		}
 	}

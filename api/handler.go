@@ -10,6 +10,7 @@ import (
 	"image/png"
 	"log"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gofiber/fiber/v3"
@@ -36,13 +37,12 @@ func createMessageHandler(c fiber.Ctx) error {
 	reqs := make([]*model.Request, 0)
 	totCnt := 0
 	for _, msg := range reqBody.Messages {
-		var scheduledAt *time.Time
+		scheduledAt := time.Now().UTC()
 		if msg.ScheduledAt != "" {
-			loc, _ := time.LoadLocation("Asia/Seoul")
-			if t, err := time.ParseInLocation(time.DateTime, msg.ScheduledAt, loc); err != nil {
+			if t, err := time.Parse(time.RFC3339, msg.ScheduledAt); err != nil {
 				return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid scheduledAt format"})
 			} else {
-				scheduledAt = &t
+				scheduledAt = t.UTC()
 			}
 		}
 		for _, email := range msg.Emails {
@@ -51,7 +51,7 @@ func createMessageHandler(c fiber.Ctx) error {
 				To:          email,
 				Subject:     msg.Subject,
 				Content:     msg.Content,
-				ScheduledAt: scheduledAt,
+				ScheduledAt: &scheduledAt,
 				Status:      model.EmailMessageStatusCreated,
 			}
 			reqs = append(reqs, req)
@@ -84,12 +84,15 @@ func createOpenEventHandler(c fiber.Ctx) error {
 	if reqId != "" {
 		// Consider email as opened and create data
 		db := config.GetDB()
-		reqIdInt, _ := strconv.Atoi(reqId)
-		_ = db.Create(&model.Result{
-			RequestId: uint(reqIdInt),
-			Status:    "Open",
-			Raw:       "{}",
-		}).Error
+		if reqIdInt, err := strconv.Atoi(reqId); err == nil {
+			_ = db.Create(&model.Result{
+				RequestId: uint(reqIdInt),
+				Status:    "Open",
+				Raw:       "{}",
+			}).Error
+		} else {
+			log.Printf("Invalid requestId: %s", reqId)
+		}
 	}
 
 	// Return a blank image
@@ -151,9 +154,12 @@ func createResultEventHandler(c fiber.Ctx) error {
 	// Find request_id from headers
 	var reqId uint
 	for _, header := range sesNotification.Mail.Headers {
-		if header.Name == "X-Request-ID" {
-			reqIdInt, _ := strconv.Atoi(header.Value)
-			reqId = uint(reqIdInt)
+		if strings.EqualFold(header.Name, "X-Request-ID") {
+			if reqIdInt, err := strconv.Atoi(header.Value); err == nil {
+				reqId = uint(reqIdInt)
+			} else {
+				log.Printf("Invalid requestId: %s", header.Value)
+			}
 			break
 		}
 	}

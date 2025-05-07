@@ -3,6 +3,7 @@ package aws
 import (
 	"aws-ses-sender-go/config"
 	"context"
+	"fmt"
 	"strconv"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -19,15 +20,18 @@ type SES struct {
 
 // NewSESClient creates an email client
 func NewSESClient(ctx context.Context) (*SES, error) {
-	AccessKeyId := config.GetEnv("AWS_ACCESS_KEY_ID")
-	SecretAccessKey := config.GetEnv("AWS_SECRET_ACCESS_KEY")
-	cfg, err := awsConfig.LoadDefaultConfig(
-		ctx,
-		awsConfig.WithRegion("ap-northeast-2"),
-		awsConfig.WithCredentialsProvider(
-			credentials.NewStaticCredentialsProvider(AccessKeyId, SecretAccessKey, ""),
-		),
-	)
+	accessKeyID := config.GetEnv("AWS_ACCESS_KEY_ID")
+	secretAccessKey := config.GetEnv("AWS_SECRET_ACCESS_KEY")
+	var cfgOpts []func(*awsConfig.LoadOptions) error
+	cfgOpts = append(cfgOpts, awsConfig.WithRegion(config.GetEnv("AWS_REGION", "ap-northeast-2")))
+
+	// If accessKeyID and secretAccessKey are set, use static credentials
+	if accessKeyID != "" && secretAccessKey != "" {
+		cfgOpts = append(cfgOpts, awsConfig.WithCredentialsProvider(
+			credentials.NewStaticCredentialsProvider(accessKeyID, secretAccessKey, ""),
+		))
+	}
+	cfg, err := awsConfig.LoadDefaultConfig(ctx, cfgOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -37,12 +41,12 @@ func NewSESClient(ctx context.Context) (*SES, error) {
 }
 
 // SendEmail sends an email
-func (s *SES) SendEmail(ctx context.Context, reqId int, subject, body *string, receivers *[]string) (string, error) {
+func (s *SES) SendEmail(ctx context.Context, reqId int, subject, body *string, receivers []string) (string, error) {
 	sender := config.GetEnv("EMAIL_SENDER")
 	input := &sesv2.SendEmailInput{
 		FromEmailAddress: aws.String(sender),
 		Destination: &types.Destination{
-			ToAddresses: *receivers,
+			ToAddresses: receivers,
 		},
 		Content: &types.EmailContent{
 			Simple: &types.Message{
@@ -66,6 +70,9 @@ func (s *SES) SendEmail(ctx context.Context, reqId int, subject, body *string, r
 	result, err := s.Client.SendEmail(ctx, input)
 	if err != nil {
 		return "", err
+	}
+	if result.MessageId == nil {
+		return "", fmt.Errorf("SES returned nil MessageId")
 	}
 	return *result.MessageId, nil
 }
