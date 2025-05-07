@@ -34,6 +34,7 @@ func createMessageHandler(c fiber.Ctx) error {
 
 	db := config.GetDB()
 	reqs := make([]*model.Request, 0)
+	totCnt := 0
 	for _, msg := range reqBody.Messages {
 		var scheduledAt *time.Time
 		if msg.ScheduledAt != "" {
@@ -54,6 +55,7 @@ func createMessageHandler(c fiber.Ctx) error {
 				Status:      model.EmailMessageStatusCreated,
 			}
 			reqs = append(reqs, req)
+			totCnt++
 		}
 	}
 
@@ -274,7 +276,7 @@ func getSentCountHandler(c fiber.Ctx) error {
 	db := config.GetDB()
 	var cnt int64
 	if err := db.Model(&model.Request{}).
-		Where("created_at > ?", startTime).
+		Where("updated_at > ?", startTime).
 		Where("status = ?", model.EmailMessageStatusSent).
 		Count(&cnt).Error; err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
