@@ -35,9 +35,7 @@ func createMessageHandler(c fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 	}
 
-	db := config.GetDB()
 	reqs := make([]*model.Request, 0)
-	totCnt := 0
 	for _, msg := range reqBody.Messages {
 		scheduledAt := time.Now().UTC()
 		if msg.ScheduledAt != "" {
@@ -52,40 +50,54 @@ func createMessageHandler(c fiber.Ctx) error {
 				}
 			}
 		}
+		// Validate essential message fields
+		trimmedSubject := strings.TrimSpace(msg.Subject)
+		if trimmedSubject == "" {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Subject cannot be empty"})
+		}
+		trimmedContent := strings.TrimSpace(msg.Content)
+		if trimmedContent == "" {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Content cannot be empty"})
+		}
 		for _, email := range msg.Emails {
 			// Validate email address
-			if _, err := mail.ParseAddress(email); err != nil {
-				return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": fmt.Sprintf("invalid email: %s", email)})
-			}
-			// Validate essential message fields
-			if strings.TrimSpace(msg.Subject) == "" {
-				return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Subject cannot be empty"})
-			}
-			if strings.TrimSpace(msg.Content) == "" {
-				return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Content cannot be empty"})
+			trimmedEmail := strings.TrimSpace(email)
+			if _, err := mail.ParseAddress(trimmedEmail); err != nil {
+				return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": fmt.Sprintf("invalid email: %s", trimmedEmail)})
 			}
 			req := &model.Request{
 				TopicId:     msg.TopicId,
-				To:          email,
-				Subject:     msg.Subject,
-				Content:     msg.Content,
+				To:          trimmedEmail,
+				Subject:     trimmedSubject,
+				Content:     trimmedContent,
 				ScheduledAt: &scheduledAt,
 				Status:      model.EmailMessageStatusCreated,
 			}
 			reqs = append(reqs, req)
-			totCnt++
 		}
 	}
 
+	if len(reqs) == 0 {
+		return c.JSON(fiber.Map{"count": 0})
+	}
+
+	totCnt := 0
 	chunkSize := 1000
+	db := config.GetDB()
 	for i := 0; i < len(reqs); i += chunkSize {
 		end := i + chunkSize
 		if end > len(reqs) {
 			end = len(reqs)
 		}
-		if err := db.Create(reqs[i:end]).Error; err != nil {
+
+		batchToCreate := reqs[i:end]
+		if len(batchToCreate) == 0 {
+			continue
+		}
+		if err := db.Create(&batchToCreate).Error; err != nil {
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 		}
+		totCnt += len(batchToCreate)
 	}
 
 	// Return the result
