@@ -48,6 +48,13 @@ flowchart TD
 
 ## Database Models
 
+### Content Table
+| Field | Type | Description |
+|------|------|------|
+| ID | uint (PK) | Content unique identifier |
+| Subject | string (not null) | Email subject |
+| Content | text (not null) | Email content |
+
 ### Request Table
 | Field | Type | Description |
 |------|------|------|
@@ -55,8 +62,7 @@ flowchart TD
 | TopicId | string (index) | Email topic identifier |
 | MessageId | string (index) | SES message identifier |
 | To | string (not null) | Recipient email |
-| Subject | string (not null) | Email subject |
-| Content | text (not null) | Email content |
+| ContentId | uint (FK, index) | Content ID reference |
 | ScheduledAt | timestamp (index) | Scheduled delivery time |
 | Status | smallint (not null) | Status code |
 | Error | string | Error message |

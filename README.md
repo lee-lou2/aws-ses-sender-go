@@ -48,6 +48,14 @@ flowchart TD
 
 ## 데이터베이스 모델
 
+### Content 테이블
+| 필드 | 타입 | 설명 |
+|------|------|------|
+| ID | uint (PK) | 내용 고유 식별자 |
+| TopicId | string (index) | 이메일 주제 식별자 |
+| Subject | string (not null) | 이메일 제목 |
+| Content | text (not null) | 이메일 내용 |
+
 ### Request 테이블
 | 필드 | 타입 | 설명 |
 |------|------|------|
@@ -55,8 +63,7 @@ flowchart TD
 | TopicId | string (index) | 이메일 주제 식별자 |
 | MessageId | string (index) | SES 메시지 식별자 |
 | To | string (not null) | 수신자 이메일 |
-| Subject | string (not null) | 이메일 제목 |
-| Content | text (not null) | 이메일 내용 |
+| ContentId | uint (FK, index) | Content ID 참조 |
 | ScheduledAt | timestamp (index) | 예약 발송 시간 |
 | Status | smallint (not null) | 상태 코드 |
 | Error | string | 오류 메시지 |

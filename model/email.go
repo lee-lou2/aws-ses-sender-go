@@ -15,13 +15,23 @@ const (
 	EmailMessageStatusStopped           // Stopped
 )
 
+type Content struct {
+	gorm.Model
+	Subject string `json:"subject" gorm:"not null;type:varchar(255)"`
+	Content string `json:"content" gorm:"not null;type:text"`
+}
+
+func (m *Content) TableName() string {
+	return "email_contents"
+}
+
 type Request struct {
 	gorm.Model
 	TopicId     string     `json:"topic_id" gorm:"index;default:'';type:varchar(50)"`
 	MessageId   string     `json:"message_id" gorm:"null;type:varchar(100)"`
 	To          string     `json:"to" gorm:"not null;type:varchar(255)"`
-	Subject     string     `json:"subject" gorm:"not null;type:varchar(255)"`
-	Content     string     `json:"content" gorm:"not null;type:text"`
+	ContentId   uint       `json:"content_id" gorm:"index;not null"`
+	Content     Content    `json:"content" gorm:"foreignKey:ContentId;references:ID"`
 	ScheduledAt *time.Time `json:"scheduled_at" gorm:"not null;index;type:timestamp"`
 	Status      int        `json:"status" gorm:"default:0;index;not null;type:smallint"`
 	Error       string     `json:"error" gorm:"null;type:varchar(255)"`
@@ -45,6 +55,7 @@ func (m *Result) TableName() string {
 
 func init() {
 	db := config.GetDB()
+	_ = db.AutoMigrate(&Content{})
 	_ = db.AutoMigrate(&Request{})
 	_ = db.AutoMigrate(&Result{})
 }
