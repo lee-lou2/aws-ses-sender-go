@@ -35,6 +35,7 @@ func createMessageHandler(c fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 	}
 
+	db := config.GetDB()
 	reqs := make([]*model.Request, 0)
 	for _, msg := range reqBody.Messages {
 		scheduledAt := time.Now().UTC()
@@ -59,6 +60,16 @@ func createMessageHandler(c fiber.Ctx) error {
 		if trimmedContent == "" {
 			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Content cannot be empty"})
 		}
+		
+		// Create Content
+		content := &model.Content{
+			Subject: trimmedSubject,
+			Content: trimmedContent,
+		}
+		if err := db.Create(content).Error; err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+		}
+
 		for _, email := range msg.Emails {
 			// Validate email address
 			trimmedEmail := strings.TrimSpace(email)
@@ -68,8 +79,7 @@ func createMessageHandler(c fiber.Ctx) error {
 			req := &model.Request{
 				TopicId:     msg.TopicId,
 				To:          trimmedEmail,
-				Subject:     trimmedSubject,
-				Content:     trimmedContent,
+				ContentId:   content.ID,
 				ScheduledAt: &scheduledAt,
 				Status:      model.EmailMessageStatusCreated,
 			}
@@ -83,7 +93,6 @@ func createMessageHandler(c fiber.Ctx) error {
 
 	totCnt := 0
 	chunkSize := 1000
-	db := config.GetDB()
 	for i := 0; i < len(reqs); i += chunkSize {
 		end := i + chunkSize
 		if end > len(reqs) {

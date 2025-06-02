@@ -27,6 +27,7 @@ func RunScheduler(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			contents := make(map[uint]*model.Content)
 			for i := 0; i < sendPerMin; i += batchSize {
 				now := time.Now().UTC()
 				reqs := make([]*model.Request, 0, batchSize)
@@ -56,6 +57,12 @@ func RunScheduler(ctx context.Context) {
 					log.Printf("Update Returning Error: %v", err)
 				} else if len(reqs) > 0 {
 					for _, req := range reqs {
+						if _, ok := contents[req.ContentId]; !ok {
+							content := &model.Content{}
+							db.First(content, req.ContentId)
+							contents[req.ContentId] = content
+						}
+						req.Content = *contents[req.ContentId]
 						reqChan <- req
 					}
 				} else {
