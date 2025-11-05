@@ -13,6 +13,9 @@ COPY . .
 # Build with CGO enabled for SQLite support
 RUN CGO_ENABLED=1 GOOS=linux go build -a -ldflags '-linkmode external -extldflags "-static"' -o app .
 
+# Create empty .env if it doesn't exist (to avoid COPY failure)
+RUN test -f .env || touch .env
+
 FROM alpine:3.21
 
 # Install runtime dependencies
