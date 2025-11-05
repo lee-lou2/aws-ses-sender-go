@@ -20,7 +20,6 @@ RUN apk --no-cache add ca-certificates sqlite-libs
 
 WORKDIR /root/
 
-COPY --from=builder /usr/src/app/.env .env
 COPY --from=builder /usr/src/app/app .
 
 CMD ["./app"]
